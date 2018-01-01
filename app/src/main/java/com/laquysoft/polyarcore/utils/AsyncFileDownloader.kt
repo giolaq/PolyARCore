@@ -71,6 +71,8 @@ class AsyncFileDownloader {
         if (state != STATE_NOT_STARTED) {
             throw IllegalStateException("Can't add files to AsyncFileDownloader after starting.")
         }
+        Log.d(TAG, "file path " + url)
+
         entries.add(Entry(fileName, url))
     }
 

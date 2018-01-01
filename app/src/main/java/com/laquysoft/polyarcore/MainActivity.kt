@@ -133,13 +133,15 @@ class MainActivity : AppCompatActivity() {
         }
         session.configure(config)
 
+        fileDownloader = AsyncFileDownloader()
+
         // Set up renderer.
         surfaceview.setPreserveEGLContextOnPause(true)
         surfaceview.setEGLContextClientVersion(2)
         surfaceview.setEGLConfigChooser(8, 8, 8, 8, 16, 0) // Alpha used for plane blending.
 
         surfaceview.setRenderer(ARRenderer(this, BackgroundRenderer(), PlaneRenderer(),
-                PointCloudRenderer(), session, displayRotationHelper))
+                PointCloudRenderer(), session, displayRotationHelper, fileDownloader))
         surfaceview.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY)
 
 
@@ -228,7 +230,6 @@ class MainActivity : AppCompatActivity() {
     private fun requestDataFiles(objFormat: FormatModel) {
         // objFormat has the list of data files for the OBJ format (OBJ file, MTL file, textures).
         // We will use a AsyncFileDownloader to download all those files.
-        fileDownloader = AsyncFileDownloader()
 
         // The "root file" is the OBJ.
         val rootFile = objFormat.root
@@ -240,7 +241,6 @@ class MainActivity : AppCompatActivity() {
             val resources = objFormat.resources
             resources.forEach { fileModel ->
                 run {
-                    Log.d(TAG, "file path " + fileModel.url)
                     val path = fileModel.relativePath
                     val url = fileModel.url
                     // For this example, we only care about OBJ and PNG files.
@@ -261,7 +261,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     // Signal to the GL thread that download is complete, so it can go ahead and
                     // import the model.
-                    Log.d(TAG, "Download complete, ready to import model.")
+                    Log.d(TAG, "Download complete, ready to import model. " + downloader.entryCount)
                     readyToImport = true
                 }
             })
@@ -279,7 +279,8 @@ class MainActivity : AppCompatActivity() {
                            val planeRenderer: PlaneRenderer,
                            var pointCloudRenderer: PointCloudRenderer,
                            var session: Session,
-                           var displayRotationHelper: DisplayRotationHelper) : GLSurfaceView.Renderer {
+                           var displayRotationHelper: DisplayRotationHelper,
+                           var downloader: AsyncFileDownloader) : GLSurfaceView.Renderer {
 
         override fun onDrawFrame(gl: GL10) {
             // Clear screen to notify driver it should not load any pixels from previous frame.
@@ -287,9 +288,12 @@ class MainActivity : AppCompatActivity() {
 
             // If we are ready to import the object and haven't done so yet, do it now.
             if (readyToImport && virtualObject == null) {
-                importDownloadedObject()
+                importDownloadedObject(downloader)
+            } else {
+                Log.d(TAG, "Count  " + readyToImport )
+
             }
-            // Notify ARCore session that the view size changed so that the perspective matrix and
+                // Notify ARCore session that the view size changed so that the perspective matrix and
             // the video background can be properly adjusted.
             displayRotationHelper.updateSessionIfNeeded(session)
 
@@ -446,14 +450,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun importDownloadedObject() {
+    private fun importDownloadedObject(downloader: AsyncFileDownloader) {
+        Log.d(TAG, "importDownloadedObject" + downloader.entryCount)
         try {
             virtualObject = ObjectRenderer()
 
             var objBytes: ByteArray? = null
             var textureBytes: ByteArray? = null
-            for (i in 0..fileDownloader.entryCount-1) {
-                val thisEntry = fileDownloader.getEntry(i)
+
+
+            for (i in 0..downloader.entryCount-1) {
+                val thisEntry = downloader.getEntry(i)
                 Log.d(TAG, "entry " + thisEntry.fileName)
                 if (thisEntry.fileName.toLowerCase().endsWith(".obj")) {
                     objBytes = thisEntry.contents
