@@ -4,8 +4,6 @@ import android.content.Context
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.os.Bundle
-import android.os.Handler
-import android.os.HandlerThread
 import android.support.design.widget.BaseTransientBottomBar
 import android.support.design.widget.Snackbar
 import android.support.v7.app.AppCompatActivity
@@ -21,16 +19,20 @@ import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException
 import com.laquysoft.polyarcore.api.PolyService
 import com.laquysoft.polyarcore.model.AssetModel
+import com.laquysoft.polyarcore.model.FileModel
 import com.laquysoft.polyarcore.model.FormatModel
 import com.laquysoft.polyarcore.rendering.BackgroundRenderer
 import com.laquysoft.polyarcore.rendering.ObjectRenderer
 import com.laquysoft.polyarcore.rendering.PlaneRenderer
 import com.laquysoft.polyarcore.rendering.PointCloudRenderer
-import com.laquysoft.polyarcore.utils.AsyncFileDownloader
 import com.laquysoft.polyarcore.utils.CameraPermissionHelper
 import com.laquysoft.polyarcore.utils.DisplayRotationHelper
 import dagger.android.AndroidInjection
 import kotlinx.android.synthetic.main.activity_main.*
+import kotlinx.coroutines.experimental.CommonPool
+import kotlinx.coroutines.experimental.async
+import kotlinx.coroutines.experimental.launch
+import okhttp3.ResponseBody
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -46,13 +48,6 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var api: PolyService
 
     lateinit var call: Call<AssetModel>
-
-    // The AsyncFileDownloader responsible for downloading a set of data files from Poly.
-    lateinit var fileDownloader: AsyncFileDownloader
-    // Our background thread, which does all of the heavy lifting so we don't block the main thread.
-    lateinit var backgroundThread: HandlerThread
-    // Handler for the background thread, to which we post background thread tasks.
-    lateinit var backgroundThreadHandler: Handler
 
     lateinit var session: Session
 
@@ -73,6 +68,7 @@ class MainActivity : AppCompatActivity() {
     lateinit var messageSnackbar: Snackbar
     lateinit var displayRotationHelper: DisplayRotationHelper
 
+    var resourcesList: MutableList<Entry> = mutableListOf()
 
     // Scale factor to apply to asset when displaying.
     private val ASSET_SCALE = 0.2f
@@ -101,7 +97,7 @@ class MainActivity : AppCompatActivity() {
 
         surfaceview.setOnTouchListener(View.OnTouchListener { v, event -> gestureDetector.onTouchEvent(event) })
 
-          var exception: Exception? = null
+        var exception: Exception? = null
         var message: String? = null
         try {
             session = Session(this)
@@ -133,7 +129,6 @@ class MainActivity : AppCompatActivity() {
         }
         session.configure(config)
 
-        fileDownloader = AsyncFileDownloader()
 
         // Set up renderer.
         surfaceview.setPreserveEGLContextOnPause(true)
@@ -141,14 +136,8 @@ class MainActivity : AppCompatActivity() {
         surfaceview.setEGLConfigChooser(8, 8, 8, 8, 16, 0) // Alpha used for plane blending.
 
         surfaceview.setRenderer(ARRenderer(this, BackgroundRenderer(), PlaneRenderer(),
-                PointCloudRenderer(), session, displayRotationHelper, fileDownloader))
+                PointCloudRenderer(), session, displayRotationHelper, resourcesList))
         surfaceview.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY)
-
-
-
-        backgroundThread = HandlerThread("Worker")
-        backgroundThread.start()
-        backgroundThreadHandler = Handler(backgroundThread.getLooper())
 
         call = api.getAsset(ASSET_ID, API_KEY)
 
@@ -233,40 +222,36 @@ class MainActivity : AppCompatActivity() {
 
         // The "root file" is the OBJ.
         val rootFile = objFormat.root
-        if (rootFile.relativePath.toLowerCase().endsWith(".obj"))
-        {
-            fileDownloader.add(rootFile.relativePath, rootFile.url)
+        if (rootFile.relativePath.toLowerCase().endsWith(".obj")) {
 
-            // The "resource files" are the MTL file and textures.
-            val resources = objFormat.resources
-            resources.forEach { fileModel ->
-                run {
-                    val path = fileModel.relativePath
-                    val url = fileModel.url
-                    // For this example, we only care about OBJ and PNG files.
-                    if (path.toLowerCase().endsWith(".obj") || path.toLowerCase().endsWith(".png")) {
-                        fileDownloader.add(path, url)
-                    }
+            var downloadList = objFormat.resources.toMutableList()
+            downloadList.add(FileModel(rootFile.relativePath, rootFile.url, "OBJ"))
+
+
+            var deferred = downloadList.map { file ->
+                Log.d("Down", "download " + file.url.drop(28))
+                async(CommonPool) {
+                    val result = api.downloadFile(file.url.drop(28)).await()
+                    saveFiles(file.relativePath, file.url, result)
                 }
             }
 
-            // Now start downloading the data files. When this is done, the callback will call
-            // processDataFiles().
-            Log.d(TAG, "Starting to download data files, # files: " + fileDownloader.entryCount)
-            fileDownloader.start(backgroundThreadHandler, object : AsyncFileDownloader.CompletionListener {
-                override fun onPolyDownloadFinished(downloader: AsyncFileDownloader) {
-                    if (downloader.isError) {
-                        Log.e(TAG, "Failed to download data files for asset.")
-                        return
-                    }
-                    // Signal to the GL thread that download is complete, so it can go ahead and
-                    // import the model.
-                    Log.d(TAG, "Download complete, ready to import model. " + downloader.entryCount)
-                    readyToImport = true
+            launch {
+                while (deferred.count { it.isActive } != 0) {
+                    readyToImport = false
                 }
-            })
+                readyToImport = true
+            }
+
+
         }
 
+    }
+
+    private fun saveFiles(path: String, url: String, content: ResponseBody): Boolean? {
+        var responseBody: ByteArray? = content!!.bytes()
+        resourcesList.add(Entry(path, url, responseBody))
+        return true
     }
 
     companion object {
@@ -280,7 +265,7 @@ class MainActivity : AppCompatActivity() {
                            var pointCloudRenderer: PointCloudRenderer,
                            var session: Session,
                            var displayRotationHelper: DisplayRotationHelper,
-                           var downloader: AsyncFileDownloader) : GLSurfaceView.Renderer {
+                           var resources: List<Entry>) : GLSurfaceView.Renderer {
 
         override fun onDrawFrame(gl: GL10) {
             // Clear screen to notify driver it should not load any pixels from previous frame.
@@ -288,12 +273,12 @@ class MainActivity : AppCompatActivity() {
 
             // If we are ready to import the object and haven't done so yet, do it now.
             if (readyToImport && virtualObject == null) {
-                importDownloadedObject(downloader)
+                importDownloadedObject(resources)
             } else {
-                Log.d(TAG, "Count  " + readyToImport )
+                Log.d(TAG, "Count  " + readyToImport)
 
             }
-                // Notify ARCore session that the view size changed so that the perspective matrix and
+            // Notify ARCore session that the view size changed so that the perspective matrix and
             // the video background can be properly adjusted.
             displayRotationHelper.updateSessionIfNeeded(session)
 
@@ -330,7 +315,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 // Draw background.
-               backgroundRenderer.draw(frame)
+                backgroundRenderer.draw(frame)
 
                 // If not tracking, don't draw 3d objects.
                 if (camera.getTrackingState() == Trackable.TrackingState.PAUSED) {
@@ -380,7 +365,7 @@ class MainActivity : AppCompatActivity() {
                     // during calls to session.update() as ARCore refines its estimate of the world.
                     anchor.getPose().toMatrix(anchorMatrix, 0)
 
-                    if ( virtualObject != null ) {
+                    if (virtualObject != null) {
                         // Update and draw the model and its shadow.
                         virtualObject!!.updateModelMatrix(anchorMatrix, ASSET_SCALE * scaleFactor)
                         virtualObject!!.draw(viewmtx, projmtx, lightIntensity)
@@ -450,22 +435,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun importDownloadedObject(downloader: AsyncFileDownloader) {
-        Log.d(TAG, "importDownloadedObject" + downloader.entryCount)
+    private fun importDownloadedObject(objects: List<Entry>) {
+        Log.d(TAG, "importDownloadedObject" + objects.size)
         try {
             virtualObject = ObjectRenderer()
 
             var objBytes: ByteArray? = null
             var textureBytes: ByteArray? = null
 
-
-            for (i in 0..downloader.entryCount-1) {
-                val thisEntry = downloader.getEntry(i)
-                Log.d(TAG, "entry " + thisEntry.fileName)
-                if (thisEntry.fileName.toLowerCase().endsWith(".obj")) {
-                    objBytes = thisEntry.contents
-                } else if (thisEntry.fileName.toLowerCase().endsWith(".png")) {
-                    textureBytes = thisEntry.contents
+            for (resource in objects) {
+                Log.d(TAG, "entry " + resource.fileName)
+                if (resource.fileName.toLowerCase().endsWith(".obj")) {
+                    objBytes = resource.contents
+                } else if (resource.fileName.toLowerCase().endsWith(".png")) {
+                    textureBytes = resource.contents
                 }
             }
 
@@ -488,5 +471,14 @@ class MainActivity : AppCompatActivity() {
         queuedSingleTaps.offer(e)
     }
 
+
+    /** Represents each file entry in the downloader.  */
+    class Entry(
+            /** The name of the file.  */
+            val fileName: String,
+            /** The URL where the file is to be fetched from.  */
+            val url: String,
+            var contents: ByteArray? = null)
+    /** The contents of the file, if it has already been fetched. Otherwise, null.  */
 
 }
