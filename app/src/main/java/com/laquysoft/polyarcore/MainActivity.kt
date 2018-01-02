@@ -18,9 +18,9 @@ import com.google.ar.core.exceptions.UnavailableApkTooOldException
 import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException
 import com.laquysoft.polyarcore.api.PolyService
-import com.laquysoft.polyarcore.model.AssetModel
-import com.laquysoft.polyarcore.model.FileModel
-import com.laquysoft.polyarcore.model.FormatModel
+import com.laquysoft.bernini.model.AssetModel
+import com.laquysoft.bernini.model.FileModel
+import com.laquysoft.bernini.model.FormatModel
 import com.laquysoft.polyarcore.rendering.BackgroundRenderer
 import com.laquysoft.polyarcore.rendering.ObjectRenderer
 import com.laquysoft.polyarcore.rendering.PlaneRenderer

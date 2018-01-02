@@ -1,6 +1,6 @@
-package com.laquysoft.polyarcore.api
+package com.laquysoft.bernini
 
-import com.laquysoft.polyarcore.model.AssetModel
+import com.laquysoft.bernini.model.AssetModel
 import kotlinx.coroutines.experimental.Deferred
 import retrofit2.Call
 import retrofit2.http.GET

@@ -1,6 +1,6 @@
 package com.laquysoft.polyarcore.api
 
-import com.laquysoft.polyarcore.model.AssetModel
+import com.laquysoft.bernini.model.AssetModel
 import retrofit2.Call
 
 /**

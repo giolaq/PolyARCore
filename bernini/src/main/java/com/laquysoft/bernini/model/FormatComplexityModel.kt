@@ -1,4 +1,4 @@
-package com.laquysoft.polyarcore.model
+package com.laquysoft.bernini.model
 
 /**
  * Created by joaobiriba on 28/12/2017.
