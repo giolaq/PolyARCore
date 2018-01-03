@@ -16,7 +16,7 @@ import okhttp3.ResponseBody
 interface PolyService {
 
     @GET("/v1/assets/{assetId}/")
-    fun getAsset(@Path("assetId") assetId: String , @Query("key") key: String) : Call<AssetModel>
+    fun getAsset(@Path("assetId") assetId: String) : Call<AssetModel>
 
     @GET("/{filePath}")
     fun downloadFile(@Path("filePath", encoded = true) filePath: String): Deferred<ResponseBody>

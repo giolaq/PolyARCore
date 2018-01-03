@@ -17,7 +17,8 @@ import com.google.ar.core.*
 import com.google.ar.core.exceptions.UnavailableApkTooOldException
 import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException
-import com.laquysoft.polyarcore.api.PolyService
+import com.laquysoft.bernini.Bernini
+import com.laquysoft.bernini.PolyService
 import com.laquysoft.bernini.model.AssetModel
 import com.laquysoft.bernini.model.FileModel
 import com.laquysoft.bernini.model.FormatModel
@@ -27,7 +28,6 @@ import com.laquysoft.polyarcore.rendering.PlaneRenderer
 import com.laquysoft.polyarcore.rendering.PointCloudRenderer
 import com.laquysoft.polyarcore.utils.CameraPermissionHelper
 import com.laquysoft.polyarcore.utils.DisplayRotationHelper
-import dagger.android.AndroidInjection
 import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.async
@@ -39,13 +39,12 @@ import retrofit2.Response
 import java.io.IOException
 import java.util.*
 import java.util.concurrent.ArrayBlockingQueue
-import javax.inject.Inject
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 
 class MainActivity : AppCompatActivity() {
 
-    @Inject lateinit var api: PolyService
+    lateinit var api: PolyService
 
     lateinit var call: Call<AssetModel>
 
@@ -80,7 +79,12 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        AndroidInjection.inject(this)
+
+        val bernini = Bernini().withApiKey(API_KEY)
+
+
+
+        api = bernini.polyService
 
 
         // Set up tap listener.
@@ -139,7 +143,7 @@ class MainActivity : AppCompatActivity() {
                 PointCloudRenderer(), session, displayRotationHelper, resourcesList))
         surfaceview.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY)
 
-        call = api.getAsset(ASSET_ID, API_KEY)
+        call = api.getAsset(ASSET_ID)
 
         call.enqueue(object : Callback<AssetModel> {
             override fun onFailure(call: Call<AssetModel>?, t: Throwable?) {
