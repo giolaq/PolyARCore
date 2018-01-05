@@ -2,10 +2,8 @@ package com.laquysoft.bernini
 
 import com.laquysoft.bernini.model.AssetModel
 import kotlinx.coroutines.experimental.Deferred
-import retrofit2.Call
 import retrofit2.http.GET
 import retrofit2.http.Path
-import retrofit2.http.Query
 import okhttp3.ResponseBody
 
 
@@ -16,7 +14,7 @@ import okhttp3.ResponseBody
 interface PolyService {
 
     @GET("/v1/assets/{assetId}/")
-    fun getAsset(@Path("assetId") assetId: String) : Call<AssetModel>
+    fun getAsset(@Path("assetId") assetId: String) : Deferred<AssetModel>
 
     @GET("/{filePath}")
     fun downloadFile(@Path("filePath", encoded = true) filePath: String): Deferred<ResponseBody>

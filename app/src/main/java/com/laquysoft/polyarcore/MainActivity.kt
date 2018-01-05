@@ -19,9 +19,7 @@ import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException
 import com.laquysoft.bernini.Bernini
 import com.laquysoft.bernini.PolyService
-import com.laquysoft.bernini.model.AssetModel
-import com.laquysoft.bernini.model.FileModel
-import com.laquysoft.bernini.model.FormatModel
+import com.laquysoft.bernini.model.Entry
 import com.laquysoft.polyarcore.rendering.BackgroundRenderer
 import com.laquysoft.polyarcore.rendering.ObjectRenderer
 import com.laquysoft.polyarcore.rendering.PlaneRenderer
@@ -29,13 +27,8 @@ import com.laquysoft.polyarcore.rendering.PointCloudRenderer
 import com.laquysoft.polyarcore.utils.CameraPermissionHelper
 import com.laquysoft.polyarcore.utils.DisplayRotationHelper
 import kotlinx.android.synthetic.main.activity_main.*
-import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.launch
-import okhttp3.ResponseBody
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
 import java.io.IOException
 import java.util.*
 import java.util.concurrent.ArrayBlockingQueue
@@ -45,8 +38,6 @@ import javax.microedition.khronos.opengles.GL10
 class MainActivity : AppCompatActivity() {
 
     lateinit var api: PolyService
-
-    lateinit var call: Call<AssetModel>
 
     lateinit var session: Session
 
@@ -81,10 +72,6 @@ class MainActivity : AppCompatActivity() {
 
 
         val bernini = Bernini().withApiKey(API_KEY)
-
-
-
-        api = bernini.polyService
 
 
         // Set up tap listener.
@@ -140,27 +127,17 @@ class MainActivity : AppCompatActivity() {
         surfaceview.setEGLConfigChooser(8, 8, 8, 8, 16, 0) // Alpha used for plane blending.
 
         surfaceview.setRenderer(ARRenderer(this, BackgroundRenderer(), PlaneRenderer(),
-                PointCloudRenderer(), session, displayRotationHelper, resourcesList))
+                PointCloudRenderer(), session, displayRotationHelper))
         surfaceview.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY)
 
-        call = api.getAsset(ASSET_ID)
-
-        call.enqueue(object : Callback<AssetModel> {
-            override fun onFailure(call: Call<AssetModel>?, t: Throwable?) {
-                Log.e("MainActivity", "Error getting data " + t.toString())
+        launch {
+            val drawOrder = async {
+                bernini.getModel(ASSET_ID)
             }
-
-            override fun onResponse(call: Call<AssetModel>?, response: Response<AssetModel>?) {
-
-                if (response != null && response.isSuccessful) {
-                    Log.d("MainActivity", "Success " + response.body()!!.displayName)
-                    response.body()!!.formats.forEach { format -> requestDataFiles(format) }
-                } else {
-                    Log.d("MainActivity", "Error getting data ")
-                }
-
-            }
-        })
+            resourcesList = drawOrder.await()
+            Log.d("Bernini", "Daje " + resourcesList)
+            readyToImport = true
+        }
     }
 
 
@@ -218,45 +195,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Requests the data files for the OBJ format.
-    // NOTE: this runs on the background thread.
-    private fun requestDataFiles(objFormat: FormatModel) {
-        // objFormat has the list of data files for the OBJ format (OBJ file, MTL file, textures).
-        // We will use a AsyncFileDownloader to download all those files.
-
-        // The "root file" is the OBJ.
-        val rootFile = objFormat.root
-        if (rootFile.relativePath.toLowerCase().endsWith(".obj")) {
-
-            var downloadList = objFormat.resources.toMutableList()
-            downloadList.add(FileModel(rootFile.relativePath, rootFile.url, "OBJ"))
-
-
-            var deferred = downloadList.map { file ->
-                Log.d("Down", "download " + file.url.drop(28))
-                async(CommonPool) {
-                    val result = api.downloadFile(file.url.drop(28)).await()
-                    saveFiles(file.relativePath, file.url, result)
-                }
-            }
-
-            launch {
-                while (deferred.count { it.isActive } != 0) {
-                    readyToImport = false
-                }
-                readyToImport = true
-            }
-
-
-        }
-
-    }
-
-    private fun saveFiles(path: String, url: String, content: ResponseBody): Boolean? {
-        var responseBody: ByteArray? = content!!.bytes()
-        resourcesList.add(Entry(path, url, responseBody))
-        return true
-    }
 
     companion object {
         private val TAG = "MainActivity"
@@ -268,8 +206,7 @@ class MainActivity : AppCompatActivity() {
                            val planeRenderer: PlaneRenderer,
                            var pointCloudRenderer: PointCloudRenderer,
                            var session: Session,
-                           var displayRotationHelper: DisplayRotationHelper,
-                           var resources: List<Entry>) : GLSurfaceView.Renderer {
+                           var displayRotationHelper: DisplayRotationHelper) : GLSurfaceView.Renderer {
 
         override fun onDrawFrame(gl: GL10) {
             // Clear screen to notify driver it should not load any pixels from previous frame.
@@ -277,7 +214,7 @@ class MainActivity : AppCompatActivity() {
 
             // If we are ready to import the object and haven't done so yet, do it now.
             if (readyToImport && virtualObject == null) {
-                importDownloadedObject(resources)
+                importDownloadedObject(resourcesList)
             } else {
                 Log.d(TAG, "Count  " + readyToImport)
 
@@ -475,14 +412,5 @@ class MainActivity : AppCompatActivity() {
         queuedSingleTaps.offer(e)
     }
 
-
-    /** Represents each file entry in the downloader.  */
-    class Entry(
-            /** The name of the file.  */
-            val fileName: String,
-            /** The URL where the file is to be fetched from.  */
-            val url: String,
-            var contents: ByteArray? = null)
-    /** The contents of the file, if it has already been fetched. Otherwise, null.  */
 
 }
